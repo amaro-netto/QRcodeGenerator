@@ -38,23 +38,23 @@ def migrar_tabela():
     try:
         cursor.execute("ALTER TABLE historico_qr_codes ADD COLUMN cor_frente TEXT")
         conn.commit()
-        print("Coluna 'cor_frente' adicionada com sucesso.")
+        # print("Coluna 'cor_frente' adicionada com sucesso.") # Comentado para não poluir o console
     except sqlite3.OperationalError as e:
-        if "duplicate column name: cor_frente" not in str(e): pass # print(f"Erro ao adicionar coluna cor_frente: {e}")
+        if "duplicate column name: cor_frente" not in str(e): pass
 
     try:
         cursor.execute("ALTER TABLE historico_qr_codes ADD COLUMN cor_fundo TEXT")
         conn.commit()
-        print("Coluna 'cor_fundo' adicionada com sucesso.")
+        # print("Coluna 'cor_fundo' adicionada com sucesso.")
     except sqlite3.OperationalError as e:
-        if "duplicate column name: cor_fundo" not in str(e): pass # print(f"Erro ao adicionar coluna cor_fundo: {e}")
+        if "duplicate column name: cor_fundo" not in str(e): pass
 
     try:
         cursor.execute("ALTER TABLE historico_qr_codes ADD COLUMN nivel_erro TEXT")
         conn.commit()
-        print("Coluna 'nivel_erro' adicionada com sucesso.")
+        # print("Coluna 'nivel_erro' adicionada com sucesso.")
     except sqlite3.OperationalError as e:
-        if "duplicate column name: nivel_erro" not in str(e): pass # print(f"Erro ao adicionar coluna nivel_erro: {e}")
+        if "duplicate column name: nivel_erro" not in str(e): pass
     finally:
         conn.close()
 
@@ -86,10 +86,8 @@ def gerar_qr_code_e_salvar(texto, nome_arquivo_base="qr_code", cor_frente="black
         img = qr.make_image(fill_color=cor_frente, back_color=cor_fundo)
 
         if caminho_personalizado:
-            # Salva no caminho personalizado sem adicionar timestamp
             final_path = caminho_personalizado
         else:
-            # Salva no diretório padrão com timestamp para histórico
             if not os.path.exists(QR_DIR):
                 os.makedirs(QR_DIR)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -134,7 +132,8 @@ def buscar_historico():
 def deletar_registro_historico(registro_id):
     """Deleta um registro do histórico pelo ID."""
     conn = sqlite3.connect(DB_NAME)
-    cursor = conn.connect()
+    # CORRIGIDO: Era conn.connect(), agora é conn.cursor()
+    cursor = conn.cursor()
     cursor.execute("DELETE FROM historico_qr_codes WHERE id = ?", (registro_id,))
     conn.commit()
     conn.close()
@@ -156,17 +155,14 @@ class QRGeneratorApp:
         self.back_color_hex = tk.StringVar(value="white")
         self.error_level_var = tk.StringVar(value="L")
 
-        # Variável para armazenar o ID do registro de histórico atualmente selecionado/editado
         self.current_selected_qr_id = None
-        # Variável para armazenar o caminho do arquivo antigo ao editar (para exclusão)
         self.current_selected_qr_old_path = None
-
 
         self.main_frame = tk.Frame(master, padx=10, pady=10)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
         # --- Seção de Geração de QR Code ---
-        self.generation_frame = tk.LabelFrame(self.main_frame, text="Gerar/Editar QR Code", padx=10, pady=10) # Texto do LabelFrame ajustado
+        self.generation_frame = tk.LabelFrame(self.main_frame, text="Gerar/Editar QR Code", padx=10, pady=10)
         self.generation_frame.pack(pady=10, fill=tk.BOTH, expand=True)
 
         self.input_options_frame = tk.Frame(self.generation_frame, padx=5, pady=5)
@@ -212,12 +208,11 @@ class QRGeneratorApp:
         self.generate_button = tk.Button(self.action_buttons_frame, text="Gerar Novo QR Code", command=self.handle_generate_qr)
         self.generate_button.pack(side=tk.LEFT, padx=5)
 
-        self.update_button = tk.Button(self.action_buttons_frame, text="Atualizar QR Code", command=self.handle_update_qr, state=tk.DISABLED) # Começa desabilitado
+        self.update_button = tk.Button(self.action_buttons_frame, text="Atualizar QR Code", command=self.handle_update_qr, state=tk.DISABLED)
         self.update_button.pack(side=tk.LEFT, padx=5)
 
         self.save_as_button = tk.Button(self.action_buttons_frame, text="Salvar Como...", command=self.handle_save_as)
         self.save_as_button.pack(side=tk.LEFT, padx=5)
-
 
         # Área para exibir o QR Code (Coluna Direita)
         self.qr_label = tk.Label(self.generation_frame)
@@ -248,10 +243,8 @@ class QRGeneratorApp:
         self.delete_history_button = tk.Button(self.history_buttons_frame, text="Excluir Selecionado", command=self.handle_delete_qr)
         self.delete_history_button.pack(side=tk.LEFT, padx=5)
 
-        # Adicionar um botão "Limpar Campos"
         self.clear_fields_button = tk.Button(self.history_buttons_frame, text="Limpar Campos", command=self.clear_input_fields)
         self.clear_fields_button.pack(side=tk.LEFT, padx=5)
-
 
         self.populate_history()
 
@@ -308,11 +301,13 @@ class QRGeneratorApp:
         self.back_color_hex.set("white")
         self.back_color_preview.config(bg="white")
         self.error_level_var.set("L (Baixo)")
-        self.qr_label.config(image='') # Limpa a imagem exibida
-        self.current_selected_qr_id = None # Reseta o ID selecionado
-        self.current_selected_qr_old_path = None # Reseta o caminho antigo
-        self.update_button.config(state=tk.DISABLED) # Desabilita o botão Atualizar
-        self.history_listbox.selection_clear(0, tk.END) # Desseleciona itens na listbox
+        self.qr_label.config(image='')
+        self.current_selected_qr_id = None
+        self.current_selected_qr_old_path = None
+        self.update_button.config(state=tk.DISABLED)
+        # Importante: Chamar selection_clear() APENAS se o usuário explicitamente limpar ou se uma operação finalizar a edição.
+        # Evita desseleção automática ao clicar em outros widgets.
+        self.history_listbox.selection_clear(0, tk.END)
 
 
     def handle_generate_qr(self):
@@ -334,7 +329,8 @@ class QRGeneratorApp:
             self.display_qr_image(caminho_qr_gerado)
             self.populate_history()
             messagebox.showinfo("Sucesso", f"QR Code gerado e salvo em histórico:\n{caminho_qr_gerado}")
-            self.clear_input_fields() # Limpa após gerar um novo
+            self.clear_input_fields()
+
 
     def handle_update_qr(self):
         """Lida com a atualização de um QR Code existente no histórico."""
@@ -359,18 +355,14 @@ class QRGeneratorApp:
         if not confirm:
             return
 
-        # Gerar o novo QR Code. Não passamos um caminho personalizado aqui para que ele use
-        # o padrão com timestamp, mantendo a consistência do histórico.
         novo_caminho_qr_gerado = gerar_qr_code_e_salvar(texto, nome_arquivo_base, cor_frente, cor_fundo, nivel_erro_sigla)
 
         if novo_caminho_qr_gerado:
             novo_nome_arquivo_final = os.path.basename(novo_caminho_qr_gerado)
 
-            # 1. Atualizar o registro no banco de dados
             atualizar_registro_historico(self.current_selected_qr_id, texto, novo_nome_arquivo_final,
                                          novo_caminho_qr_gerado, cor_frente, cor_fundo, nivel_erro_sigla)
 
-            # 2. Remover o arquivo de imagem antigo, se existir
             if self.current_selected_qr_old_path and os.path.exists(self.current_selected_qr_old_path):
                 try:
                     os.remove(self.current_selected_qr_old_path)
@@ -380,9 +372,8 @@ class QRGeneratorApp:
 
             messagebox.showinfo("Sucesso", f"QR Code atualizado com sucesso e salvo como:\n{novo_caminho_qr_gerado}")
             self.display_qr_image(novo_caminho_qr_gerado)
-            self.populate_history() # Atualiza a lista
-            self.clear_input_fields() # Limpa os campos após a atualização
-            self.update_button.config(state=tk.DISABLED) # Desabilita o botão Atualizar novamente
+            self.populate_history()
+            self.clear_input_fields()
 
 
     def handle_save_as(self):
@@ -444,19 +435,24 @@ class QRGeneratorApp:
                 self.history_listbox.insert(tk.END, f"ID: {registro[0]} | Nome: {registro[2]} | Criado em: {registro[4]} | Cores: {registro[5]}/{registro[6]} | Nível: {registro[7]}")
 
     def display_selected_qr(self, event):
-        """Exibe o QR Code selecionado na Listbox e preenche os campos de entrada e personalização."""
+        """
+        Exibe o QR Code selecionado na Listbox e preenche os campos de entrada e personalização.
+        Só limpa os campos se realmente não houver seleção (ex: clique fora ou deseleção manual).
+        """
         selected_indices = self.history_listbox.curselection()
-        if not selected_indices:
-            self.clear_input_fields() # Limpa os campos se nada estiver selecionado
-            return
 
+        if not selected_indices:
+            # Se não há seleção, e antes havia um item selecionado, significa que foi desselecionado.
+            if self.current_selected_qr_id is not None:
+                self.clear_input_fields()
+            return # Sai da função, pois não há item para exibir/preencher
+
+        # Se chegamos aqui, um item FOI selecionado.
         index = selected_indices[0]
         selected_record = self.history_data[index]
-        # ID: 0, Texto: 1, Nome_Arquivo: 2, Caminho_Completo: 3, Data_Criacao: 4, Cor_Frente: 5, Cor_Fundo: 6, Nivel_Erro: 7
         record_id = selected_record[0]
         caminho_completo = selected_record[3]
 
-        # Armazena o ID e o caminho antigo para a função de atualização
         self.current_selected_qr_id = record_id
         self.current_selected_qr_old_path = caminho_completo
 
@@ -485,7 +481,7 @@ class QRGeneratorApp:
         }
         self.error_level_var.set(nivel_erro_map_display.get(selected_record[7], "L (Baixo)"))
 
-        self.update_button.config(state=tk.NORMAL) # Habilita o botão Atualizar quando um item é selecionado
+        self.update_button.config(state=tk.NORMAL)
 
 
     def handle_delete_qr(self):
@@ -507,7 +503,6 @@ class QRGeneratorApp:
 
         if confirm:
             try:
-                # Use a função deletar_registro_historico que se conecta ao DB
                 deletar_registro_historico(record_id)
 
                 if os.path.exists(caminho_arquivo):
@@ -518,7 +513,7 @@ class QRGeneratorApp:
 
                 messagebox.showinfo("Sucesso", "QR Code excluído com sucesso.")
                 self.populate_history()
-                self.clear_input_fields() # Limpa e reseta os campos após a exclusão
+                self.clear_input_fields()
 
             except Exception as e:
                 messagebox.showerror("Erro", f"Erro ao excluir QR Code: {e}")
