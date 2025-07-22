@@ -2,6 +2,7 @@ import qrcode
 import sqlite3
 import datetime
 import os
+import re # Importar para validação de nome de arquivo
 import tkinter as tk
 from tkinter import messagebox, filedialog, colorchooser, ttk
 from PIL import Image, ImageTk
@@ -22,9 +23,9 @@ def criar_tabela():
             nome_arquivo TEXT NOT NULL,
             caminho_completo TEXT NOT NULL,
             data_criacao TEXT NOT NULL,
-            cor_frente TEXT,      -- Nova coluna para cor da frente
-            cor_fundo TEXT,       -- Nova coluna para cor de fundo
-            nivel_erro TEXT       -- Nova coluna para nível de erro
+            cor_frente TEXT,
+            cor_fundo TEXT,
+            nivel_erro TEXT
         )
     ''')
     conn.commit()
@@ -58,18 +59,12 @@ def migrar_tabela():
         conn.close()
 
 
-def gerar_qr_code_e_salvar(texto, nome_arquivo_base="qr_code", cor_frente="black", cor_fundo="white", nivel_erro="L"):
+def gerar_qr_code_e_salvar(texto, nome_arquivo_base="qr_code", cor_frente="black", cor_fundo="white", nivel_erro="L", caminho_personalizado=None):
     """
-    Gera um QR Code a partir de um texto, o salva como imagem e retorna o caminho.
-    Permite personalizar cores e nível de correção de erro.
+    Gera um QR Code a partir de um texto, o salva como imagem.
+    Retorna o caminho completo do arquivo gerado.
+    Se 'caminho_personalizado' for fornecido, salva lá. Caso contrário, usa o diretório padrão.
     """
-    if not os.path.exists(QR_DIR):
-        os.makedirs(QR_DIR)
-
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    nome_arquivo_completo = f"{nome_arquivo_base}_{timestamp}.png"
-    caminho_completo = os.path.join(QR_DIR, nome_arquivo_completo)
-
     error_correction_map = {
         "L": qrcode.constants.ERROR_CORRECT_L,
         "M": qrcode.constants.ERROR_CORRECT_M,
@@ -89,8 +84,20 @@ def gerar_qr_code_e_salvar(texto, nome_arquivo_base="qr_code", cor_frente="black
         qr.make(fit=True)
 
         img = qr.make_image(fill_color=cor_frente, back_color=cor_fundo)
-        img.save(caminho_completo)
-        return caminho_completo
+
+        if caminho_personalizado:
+            # Salva no caminho personalizado sem adicionar timestamp
+            final_path = caminho_personalizado
+        else:
+            # Salva no diretório padrão com timestamp para histórico
+            if not os.path.exists(QR_DIR):
+                os.makedirs(QR_DIR)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            nome_arquivo_completo = f"{nome_arquivo_base}_{timestamp}.png"
+            final_path = os.path.join(QR_DIR, nome_arquivo_completo)
+
+        img.save(final_path)
+        return final_path
     except Exception as e:
         messagebox.showerror("Erro", f"Erro ao gerar QR Code: {e}")
         return None
@@ -128,7 +135,7 @@ class QRGeneratorApp:
     def __init__(self, master):
         self.master = master
         master.title("Gerador de QR Code")
-        master.geometry("800x700") # Ajustei a altura, pode ser que precise de mais ou menos
+        master.geometry("800x700")
 
         criar_tabela()
         migrar_tabela()
@@ -143,27 +150,24 @@ class QRGeneratorApp:
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
         # --- Seção de Geração de QR Code ---
-        # Usaremos um sub-frame para os controles de input e personalização à esquerda
-        # E o qr_label à direita, dentro do generation_frame.
         self.generation_frame = tk.LabelFrame(self.main_frame, text="Gerar Novo QR Code", padx=10, pady=10)
-        self.generation_frame.pack(pady=10, fill=tk.BOTH, expand=True) # expand=True para preencher o espaço
+        self.generation_frame.pack(pady=10, fill=tk.BOTH, expand=True)
 
-        # Sub-frame para Inputs e Opções (Coluna Esquerda)
         self.input_options_frame = tk.Frame(self.generation_frame, padx=5, pady=5)
-        self.input_options_frame.grid(row=0, column=0, sticky="nsew") # sticky="nsew" para expandir
+        self.input_options_frame.grid(row=0, column=0, sticky="nsew")
 
         tk.Label(self.input_options_frame, text="Texto/URL:").grid(row=0, column=0, sticky="w", pady=5)
-        self.text_input = tk.Entry(self.input_options_frame, width=40) # Largura ajustada
+        self.text_input = tk.Entry(self.input_options_frame, width=40)
         self.text_input.grid(row=0, column=1, padx=5, pady=5)
 
         tk.Label(self.input_options_frame, text="Nome do Arquivo:").grid(row=1, column=0, sticky="w", pady=5)
-        self.filename_input = tk.Entry(self.input_options_frame, width=40) # Largura ajustada
+        self.filename_input = tk.Entry(self.input_options_frame, width=40)
         self.filename_input.grid(row=1, column=1, padx=5, pady=5)
         self.filename_input.insert(0, "meu_qr_code")
 
         # --- Opções de Personalização ---
         self.options_frame = tk.LabelFrame(self.input_options_frame, text="Opções de Personalização", padx=10, pady=5)
-        self.options_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=10) # sticky "ew" para expandir horizontalmente
+        self.options_frame.grid(row=2, column=0, columnspan=2, sticky="ew", pady=10)
 
         tk.Label(self.options_frame, text="Cor do QR Code:").grid(row=0, column=0, sticky="w", pady=2)
         self.front_color_button = tk.Button(self.options_frame, text="Escolher Cor", command=self.choose_front_color)
@@ -185,18 +189,24 @@ class QRGeneratorApp:
         self.error_level_combobox.grid(row=2, column=1, columnspan=2, sticky="ew", padx=5, pady=2)
         self.error_level_combobox.set("L (Baixo)")
 
-        self.generate_button = tk.Button(self.input_options_frame, text="Gerar QR Code", command=self.handle_generate_qr)
-        self.generate_button.grid(row=3, column=0, columnspan=2, pady=10) # Posicionado no input_options_frame
+        # Botões de Ação (Gerar e Salvar Como)
+        self.action_buttons_frame = tk.Frame(self.input_options_frame)
+        self.action_buttons_frame.grid(row=3, column=0, columnspan=2, pady=10)
+
+        self.generate_button = tk.Button(self.action_buttons_frame, text="Gerar QR Code", command=self.handle_generate_qr)
+        self.generate_button.pack(side=tk.LEFT, padx=5)
+
+        self.save_as_button = tk.Button(self.action_buttons_frame, text="Salvar Como...", command=self.handle_save_as)
+        self.save_as_button.pack(side=tk.LEFT, padx=5)
+
 
         # Área para exibir o QR Code (Coluna Direita)
         self.qr_label = tk.Label(self.generation_frame)
-        # Ocupa a coluna 1 e expande (sticky "nsew")
         self.qr_label.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
 
-        # Configura as colunas do generation_frame para expandir
-        self.generation_frame.grid_columnconfigure(0, weight=1) # Coluna da esquerda (inputs)
-        self.generation_frame.grid_columnconfigure(1, weight=1) # Coluna da direita (QR Code)
-        self.generation_frame.grid_rowconfigure(0, weight=1) # A única linha que contém tudo
+        self.generation_frame.grid_columnconfigure(0, weight=1)
+        self.generation_frame.grid_columnconfigure(1, weight=1)
+        self.generation_frame.grid_rowconfigure(0, weight=1)
 
         # --- Seção de Histórico ---
         self.history_frame = tk.LabelFrame(self.main_frame, text="Histórico de QR Codes", padx=10, pady=10)
@@ -233,21 +243,52 @@ class QRGeneratorApp:
             self.back_color_hex.set(color_code[1])
             self.back_color_preview.config(bg=color_code[1])
 
+    def sanitize_filename(self, filename):
+        """Remove caracteres inválidos para nomes de arquivo."""
+        # Caracteres inválidos em Windows/Linux/macOS
+        invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
+        cleaned_filename = re.sub(invalid_chars, '', filename)
+        # Substitui espaços por underscores e remove espaços extras
+        cleaned_filename = cleaned_filename.strip().replace(' ', '_')
+        return cleaned_filename
+
+    def validate_inputs(self):
+        """Valida os campos de entrada antes de gerar ou salvar."""
+        texto = self.text_input.get().strip()
+        nome_arquivo_base = self.filename_input.get().strip()
+
+        if not texto:
+            messagebox.showwarning("Atenção", "O campo 'Texto/URL' não pode estar vazio.")
+            return False, None, None
+
+        if not nome_arquivo_base:
+            messagebox.showwarning("Atenção", "O campo 'Nome do Arquivo' não pode estar vazio.")
+            return False, None, None
+
+        # Sanitize o nome do arquivo para garantir que é válido para o sistema de arquivos
+        sanitized_filename = self.sanitize_filename(nome_arquivo_base)
+        if sanitized_filename != nome_arquivo_base:
+            messagebox.showinfo("Aviso", f"O nome do arquivo '{nome_arquivo_base}' foi ajustado para '{sanitized_filename}' para remover caracteres inválidos.")
+            self.filename_input.delete(0, tk.END)
+            self.filename_input.insert(0, sanitized_filename)
+        if not sanitized_filename: # Se após sanitizar, o nome ficou vazio (ex: só tinha caracteres inválidos)
+            messagebox.showwarning("Atenção", "O nome do arquivo resultante da limpeza está vazio. Por favor, insira um nome válido.")
+            return False, None, None
+
+
+        return True, texto, sanitized_filename
+
+
     def handle_generate_qr(self):
-        """Lida com a ação de gerar um QR Code, incluindo personalização."""
-        texto = self.text_input.get()
-        nome_arquivo_base = self.filename_input.get()
+        """Lida com a ação de gerar um QR Code, incluindo personalização e validação."""
+        is_valid, texto, nome_arquivo_base = self.validate_inputs()
+        if not is_valid:
+            return
+
         cor_frente = self.front_color_hex.get()
         cor_fundo = self.back_color_hex.get()
         nivel_erro_display = self.error_level_var.get()
         nivel_erro_sigla = nivel_erro_display[0]
-
-        if not texto:
-            messagebox.showwarning("Atenção", "Por favor, digite o texto ou URL para gerar o QR Code.")
-            return
-
-        if not nome_arquivo_base:
-            nome_arquivo_base = "qr_code"
 
         caminho_qr_gerado = gerar_qr_code_e_salvar(texto, nome_arquivo_base, cor_frente, cor_fundo, nivel_erro_sigla)
 
@@ -256,15 +297,49 @@ class QRGeneratorApp:
             registrar_historico(texto, nome_arquivo_final, caminho_qr_gerado, cor_frente, cor_fundo, nivel_erro_sigla)
             self.display_qr_image(caminho_qr_gerado)
             self.populate_history()
-            messagebox.showinfo("Sucesso", f"QR Code gerado e salvo como:\n{caminho_qr_gerado}")
+            messagebox.showinfo("Sucesso", f"QR Code gerado e salvo em histórico:\n{caminho_qr_gerado}")
+
+    def handle_save_as(self):
+        """Lida com a ação de salvar o QR Code em um local específico escolhido pelo usuário."""
+        is_valid, texto, nome_arquivo_base = self.validate_inputs()
+        if not is_valid:
+            return
+
+        cor_frente = self.front_color_hex.get()
+        cor_fundo = self.back_color_hex.get()
+        nivel_erro_display = self.error_level_var.get()
+        nivel_erro_sigla = nivel_erro_display[0]
+
+        # Abre a caixa de diálogo "Salvar Como"
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".png",
+            filetypes=[("PNG files", "*.png"), ("All files", "*.*")],
+            initialfile=nome_arquivo_base # Sugere o nome do arquivo atual
+        )
+
+        if file_path: # Se o usuário selecionou um caminho
+            caminho_qr_gerado = gerar_qr_code_e_salvar(
+                texto,
+                nome_arquivo_base, # Não é usado para nomear o arquivo aqui, mas é um parâmetro da função
+                cor_frente,
+                cor_fundo,
+                nivel_erro_sigla,
+                caminho_personalizado=file_path # Passa o caminho escolhido pelo usuário
+            )
+            if caminho_qr_gerado:
+                messagebox.showinfo("Sucesso", f"QR Code salvo com sucesso em:\n{caminho_qr_gerado}")
+                # Não registramos no histórico ao usar "Salvar Como", apenas ao usar "Gerar QR Code"
+                # Opcional: Você pode optar por registrar no histórico também se quiser que todo QR code salvo seja registrado.
+                # Para este exemplo, ele só será registrado se você clicar em "Gerar QR Code".
+        else:
+            messagebox.showinfo("Informação", "Operação 'Salvar Como' cancelada.")
+
 
     def display_qr_image(self, image_path):
         """Exibe a imagem do QR Code na interface."""
         try:
             img = Image.open(image_path)
-            # Redimensiona a imagem para preencher o espaço, mas mantendo proporção.
-            # Ajuste o tamanho máximo se necessário.
-            img.thumbnail((300, 300), Image.LANCZOS) # Aumentei o tamanho máximo para melhor visualização
+            img.thumbnail((300, 300), Image.LANCZOS)
             photo = ImageTk.PhotoImage(img)
             self.qr_label.config(image=photo)
             self.qr_label.image = photo
