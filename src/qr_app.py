@@ -1,184 +1,46 @@
-import qrcode
-import sqlite3
-import datetime
-import os
-import re
+# src/qr_app.py
+
 import tkinter as tk
 from tkinter import messagebox, filedialog, colorchooser, ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk 
+import os
+import re
+import io
 
-# --- Funções do Gerador de QR Code e Banco de Dados ---
+# Tenta importar win32clipboard, mas o fallback ainda está dentro de copy_qr_to_clipboard
+try:
+    import win32clipboard
+except ImportError:
+    win32clipboard = None
 
-DB_NAME = 'historico_qr_codes.db'
-QR_DIR = 'qr_codes'
-
-def criar_tabela():
-    """Cria a tabela de historico_qr_codes se ela não existir."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS historico_qr_codes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            texto_qr TEXT NOT NULL,
-            nome_arquivo TEXT NOT NULL,
-            caminho_completo TEXT NOT NULL,
-            data_criacao TEXT NOT NULL,
-            cor_frente TEXT,
-            cor_fundo TEXT,
-            nivel_erro TEXT
-            -- Não adicionaremos caminho_logo aqui para simplificar o histórico de logos
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def migrar_tabela():
-    """Adiciona colunas para cor e nível de erro se não existirem."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    try:
-        cursor.execute("ALTER TABLE historico_qr_codes ADD COLUMN cor_frente TEXT")
-        conn.commit()
-    except sqlite3.OperationalError as e:
-        if "duplicate column name: cor_frente" not in str(e): pass
-
-    try:
-        cursor.execute("ALTER TABLE historico_qr_codes ADD COLUMN cor_fundo TEXT")
-        conn.commit()
-    except sqlite3.OperationalError as e:
-        if "duplicate column name: cor_fundo" not in str(e): pass
-
-    try:
-        cursor.execute("ALTER TABLE historico_qr_codes ADD COLUMN nivel_erro TEXT")
-        conn.commit()
-    except sqlite3.OperationalError as e:
-        if "duplicate column name: nivel_erro" not in str(e): pass
-    finally:
-        conn.close()
-
-
-def gerar_qr_code_e_salvar(texto, nome_arquivo_base="qr_code", cor_frente="black", cor_fundo="white", nivel_erro="L", caminho_personalizado=None, caminho_logo=None):
-    """
-    Gera um QR Code a partir de um texto, o salva como imagem e retorna o caminho.
-    Permite personalizar cores, nível de correção de erro e adicionar um logo.
-    """
-    error_correction_map = {
-        "L": qrcode.constants.ERROR_CORRECT_L,
-        "M": qrcode.constants.ERROR_CORRECT_M,
-        "Q": qrcode.constants.ERROR_CORRECT_Q,
-        "H": qrcode.constants.ERROR_CORRECT_H,
-    }
-    error_level = error_correction_map.get(nivel_erro, qrcode.constants.ERROR_CORRECT_L)
-
-    try:
-        qr = qrcode.QRCode(
-            version=1, # Pode precisar aumentar a versão se o texto for longo e tiver logo
-            error_correction=error_level,
-            box_size=10,
-            border=4,
-        )
-        qr.add_data(texto)
-        qr.make(fit=True)
-
-        img_qr = qr.make_image(fill_color=cor_frente, back_color=cor_fundo).convert("RGBA") # Converter para RGBA para logos com transparência
-
-        if caminho_logo and os.path.exists(caminho_logo):
-            try:
-                logo = Image.open(caminho_logo).convert("RGBA") # Abrir logo e converter para RGBA
-                # Calcular o tamanho ideal do logo (aprox. 30% do QR Code, ajustável)
-                qr_width, qr_height = img_qr.size
-                logo_size = int(qr_width * 0.25) # 25% do tamanho do QR, geralmente um bom ponto de partida
-
-                # Redimensionar o logo
-                logo.thumbnail((logo_size, logo_size), Image.LANCZOS)
-
-                # Calcular posição central para colar o logo
-                logo_width, logo_height = logo.size
-                pos_x = (qr_width - logo_width) // 2
-                pos_y = (qr_height - logo_height) // 2
-
-                # Colar o logo no QR Code
-                img_qr.paste(logo, (pos_x, pos_y), logo) # O último 'logo' é para usar a máscara de transparência
-
-            except Exception as e:
-                messagebox.showwarning("Aviso", f"Não foi possível aplicar o logo. Erro: {e}\nGerando QR Code sem logo.")
-                # Continua sem logo
-        
-        # Salvar a imagem final
-        if caminho_personalizado:
-            final_path = caminho_personalizado
-        else:
-            if not os.path.exists(QR_DIR):
-                os.makedirs(QR_DIR)
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            nome_arquivo_completo = f"{nome_arquivo_base}_{timestamp}.png"
-            final_path = os.path.join(QR_DIR, nome_arquivo_completo)
-
-        img_qr.save(final_path)
-        return final_path
-    except Exception as e:
-        messagebox.showerror("Erro", f"Erro ao gerar QR Code: {e}")
-        return None
-
-def registrar_historico(texto_qr, nome_arquivo, caminho_completo, cor_frente, cor_fundo, nivel_erro):
-    """Registra a geração do QR Code no banco de dados, incluindo cores e nível de erro."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    data_hora_atual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cursor.execute("INSERT INTO historico_qr_codes (texto_qr, nome_arquivo, caminho_completo, data_criacao, cor_frente, cor_fundo, nivel_erro) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                   (texto_qr, nome_arquivo, caminho_completo, data_hora_atual, cor_frente, cor_fundo, nivel_erro))
-    conn.commit()
-    conn.close()
-
-def atualizar_registro_historico(record_id, texto_qr, nome_arquivo, caminho_completo, cor_frente, cor_fundo, nivel_erro):
-    """Atualiza um registro existente no banco de dados."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    data_hora_atual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cursor.execute("UPDATE historico_qr_codes SET texto_qr=?, nome_arquivo=?, caminho_completo=?, data_criacao=?, cor_frente=?, cor_fundo=?, nivel_erro=? WHERE id=?",
-                   (texto_qr, nome_arquivo, caminho_completo, data_hora_atual, cor_frente, cor_fundo, nivel_erro, record_id))
-    conn.commit()
-    conn.close()
-
-def buscar_historico():
-    """Retorna todos os registros do histórico, incluindo novas colunas."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, texto_qr, nome_arquivo, caminho_completo, data_criacao, cor_frente, cor_fundo, nivel_erro FROM historico_qr_codes ORDER BY data_criacao DESC")
-    registros = cursor.fetchall()
-    conn.close()
-    return registros
-
-def deletar_registro_historico(registro_id):
-    """Deleta um registro do histórico pelo ID."""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM historico_qr_codes WHERE id = ?", (registro_id,))
-    conn.commit()
-    conn.close()
-
-# --- Funções da Interface Gráfica ---
+# Importações corrigidas para o novo layout de pacote e config
+from src import db_manager
+from src import qr_logic
+from src.config import DB_NAME, IMAGES_DIR, TEMP_CLIPBOARD_DIR # Importa diretórios de config
 
 class QRGeneratorApp:
     def __init__(self, master):
         self.master = master
         master.title("Gerador de QR Code")
-        master.geometry("800x750") # Aumentei um pouco a altura para o campo do logo
+        master.geometry("800x750")
 
-        criar_tabela()
-        migrar_tabela()
-        if not os.path.exists(QR_DIR):
-            os.makedirs(QR_DIR)
+        # Garante que os diretórios necessários existam (já feito em config.py, mas pode repetir para segurança)
+        os.makedirs(IMAGES_DIR, exist_ok=True)
+        os.makedirs(TEMP_CLIPBOARD_DIR, exist_ok=True)
+        
+        # Inicializa o banco de dados
+        db_manager.criar_tabela()
+        db_manager.migrar_tabela()
 
         self.front_color_hex = tk.StringVar(value="black")
         self.back_color_hex = tk.StringVar(value="white")
         self.error_level_var = tk.StringVar(value="L")
 
-        # Nova variável para o caminho do logo
         self.logo_path_var = tk.StringVar(value="")
 
         self.current_selected_qr_id = None
         self.current_selected_qr_old_path = None
+        self.current_displayed_qr_image_path = None
 
 
         self.main_frame = tk.Frame(master, padx=10, pady=10)
@@ -226,15 +88,15 @@ class QRGeneratorApp:
 
         # --- Adicionar Logo ---
         tk.Label(self.options_frame, text="Caminho do Logo:").grid(row=3, column=0, sticky="w", pady=2)
-        self.logo_entry = tk.Entry(self.options_frame, textvariable=self.logo_path_var, width=25) # Menor largura para o botão caber
+        self.logo_entry = tk.Entry(self.options_frame, textvariable=self.logo_path_var, width=25)
         self.logo_entry.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
         self.logo_button = tk.Button(self.options_frame, text="Buscar", command=self.choose_logo_file)
         self.logo_button.grid(row=3, column=2, sticky="w", padx=5, pady=2)
 
 
-        # Botões de Ação (Gerar, Salvar Como e Atualizar)
+        # Botões de Ação (Gerar, Salvar Como, Atualizar e Copiar)
         self.action_buttons_frame = tk.Frame(self.input_options_frame)
-        self.action_buttons_frame.grid(row=4, column=0, columnspan=2, pady=10) # row alterada para acomodar o logo
+        self.action_buttons_frame.grid(row=4, column=0, columnspan=2, pady=10)
 
         self.generate_button = tk.Button(self.action_buttons_frame, text="Gerar Novo QR Code", command=self.handle_generate_qr)
         self.generate_button.pack(side=tk.LEFT, padx=5)
@@ -244,6 +106,9 @@ class QRGeneratorApp:
 
         self.save_as_button = tk.Button(self.action_buttons_frame, text="Salvar Como...", command=self.handle_save_as)
         self.save_as_button.pack(side=tk.LEFT, padx=5)
+
+        self.copy_to_clipboard_button = tk.Button(self.action_buttons_frame, text="Copiar Imagem", command=self.copy_qr_to_clipboard, state=tk.DISABLED)
+        self.copy_to_clipboard_button.pack(side=tk.LEFT, padx=5)
 
         # Área para exibir o QR Code (Coluna Direita)
         self.qr_label = tk.Label(self.generation_frame)
@@ -299,13 +164,6 @@ class QRGeneratorApp:
         if file_path:
             self.logo_path_var.set(file_path)
 
-    def sanitize_filename(self, filename):
-        """Remove caracteres inválidos para nomes de arquivo."""
-        invalid_chars = r'[<>:"/\\|?*\x00-\x1f]'
-        cleaned_filename = re.sub(invalid_chars, '', filename)
-        cleaned_filename = cleaned_filename.strip().replace(' ', '_')
-        return cleaned_filename
-
     def validate_inputs(self):
         """Valida os campos de entrada antes de gerar ou salvar."""
         texto = self.text_input.get().strip()
@@ -319,7 +177,7 @@ class QRGeneratorApp:
             messagebox.showwarning("Atenção", "O campo 'Nome do Arquivo' não pode estar vazio.")
             return False, None, None
 
-        sanitized_filename = self.sanitize_filename(nome_arquivo_base)
+        sanitized_filename = qr_logic.sanitize_filename(nome_arquivo_base)
         if sanitized_filename != nome_arquivo_base:
             messagebox.showinfo("Aviso", f"O nome do arquivo '{nome_arquivo_base}' foi ajustado para '{sanitized_filename}' para remover caracteres inválidos.")
             self.filename_input.delete(0, tk.END)
@@ -340,16 +198,18 @@ class QRGeneratorApp:
         self.back_color_hex.set("white")
         self.back_color_preview.config(bg="white")
         self.error_level_var.set("L (Baixo)")
-        self.logo_path_var.set("") # Limpa o caminho do logo
+        self.logo_path_var.set("")
         self.qr_label.config(image='')
         self.current_selected_qr_id = None
         self.current_selected_qr_old_path = None
+        self.current_displayed_qr_image_path = None
         self.update_button.config(state=tk.DISABLED)
+        self.copy_to_clipboard_button.config(state=tk.DISABLED)
         self.history_listbox.selection_clear(0, tk.END)
 
 
     def handle_generate_qr(self):
-        """Lida com a ação de gerar um NOVO QR Code, incluindo logo."""
+        """Lida com a ação de gerar um NOVO QR Code."""
         is_valid, texto, nome_arquivo_base = self.validate_inputs()
         if not is_valid:
             return
@@ -360,23 +220,24 @@ class QRGeneratorApp:
         nivel_erro_sigla = nivel_erro_display[0]
         caminho_logo = self.logo_path_var.get() if self.logo_path_var.get() else None
 
-        caminho_qr_gerado = gerar_qr_code_e_salvar(
-            texto, nome_arquivo_base, cor_frente, cor_fundo, nivel_erro_sigla, caminho_logo=caminho_logo
-        )
+        try:
+            caminho_qr_gerado = qr_logic.gerar_qr_code_e_salvar(
+                texto, nome_arquivo_base, cor_frente, cor_fundo, nivel_erro_sigla, caminho_logo=caminho_logo
+            )
 
-        if caminho_qr_gerado:
-            nome_arquivo_final = os.path.basename(caminho_qr_gerado)
-            # Salvamos no histórico sem o caminho do logo para simplificar.
-            # Se precisar rastrear o logo usado, a coluna precisaria ser adicionada ao DB.
-            registrar_historico(texto, nome_arquivo_final, caminho_qr_gerado, cor_frente, cor_fundo, nivel_erro_sigla)
-            self.display_qr_image(caminho_qr_gerado)
-            self.populate_history()
-            messagebox.showinfo("Sucesso", f"QR Code gerado e salvo em histórico:\n{caminho_qr_gerado}")
-            self.clear_input_fields()
+            if caminho_qr_gerado:
+                nome_arquivo_final = os.path.basename(caminho_qr_gerado)
+                db_manager.registrar_historico(texto, nome_arquivo_final, caminho_qr_gerado, cor_frente, cor_fundo, nivel_erro_sigla)
+                self.display_qr_image(caminho_qr_gerado)
+                self.populate_history()
+                messagebox.showinfo("Sucesso", f"QR Code gerado e salvo em histórico:\n{caminho_qr_gerado}")
+                self.clear_input_fields()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao gerar QR Code: {e}")
 
 
     def handle_update_qr(self):
-        """Lida com a atualização de um QR Code existente no histórico, incluindo logo."""
+        """Lida com a atualização de um QR Code existente no histórico."""
         if not self.current_selected_qr_id:
             messagebox.showwarning("Atenção", "Nenhum QR Code selecionado para atualizar.")
             return
@@ -389,7 +250,7 @@ class QRGeneratorApp:
         cor_fundo = self.back_color_hex.get()
         nivel_erro_display = self.error_level_var.get()
         nivel_erro_sigla = nivel_erro_display[0]
-        caminho_logo = self.logo_path_var.get() if self.logo_path_var.get() else None # Pega o logo atual dos campos
+        caminho_logo = self.logo_path_var.get() if self.logo_path_var.get() else None
 
         confirm = messagebox.askyesno(
             "Confirmar Atualização",
@@ -399,31 +260,34 @@ class QRGeneratorApp:
         if not confirm:
             return
 
-        novo_caminho_qr_gerado = gerar_qr_code_e_salvar(
-            texto, nome_arquivo_base, cor_frente, cor_fundo, nivel_erro_sigla, caminho_logo=caminho_logo
-        )
+        try:
+            novo_caminho_qr_gerado = qr_logic.gerar_qr_code_e_salvar(
+                texto, nome_arquivo_base, cor_frente, cor_fundo, nivel_erro_sigla, caminho_logo=caminho_logo
+            )
 
-        if novo_caminho_qr_gerado:
-            novo_nome_arquivo_final = os.path.basename(novo_caminho_qr_gerado)
+            if novo_caminho_qr_gerado:
+                novo_nome_arquivo_final = os.path.basename(novo_caminho_qr_gerado)
 
-            atualizar_registro_historico(self.current_selected_qr_id, texto, novo_nome_arquivo_final,
-                                         novo_caminho_qr_gerado, cor_frente, cor_fundo, nivel_erro_sigla)
+                db_manager.atualizar_registro_historico(self.current_selected_qr_id, texto, novo_nome_arquivo_final,
+                                             novo_caminho_qr_gerado, cor_frente, cor_fundo, nivel_erro_sigla)
 
-            if self.current_selected_qr_old_path and os.path.exists(self.current_selected_qr_old_path):
-                try:
-                    os.remove(self.current_selected_qr_old_path)
-                    print(f"Arquivo antigo '{self.current_selected_qr_old_path}' removido.")
-                except Exception as e:
-                    print(f"Erro ao remover arquivo antigo '{self.current_selected_qr_old_path}': {e}")
+                if os.path.exists(self.current_selected_qr_old_path):
+                    try:
+                        os.remove(self.current_selected_qr_old_path)
+                        print(f"Arquivo antigo '{self.current_selected_qr_old_path}' removido.")
+                    except Exception as e:
+                        print(f"Erro ao remover arquivo antigo '{self.current_selected_qr_old_path}': {e}")
 
-            messagebox.showinfo("Sucesso", f"QR Code atualizado com sucesso e salvo como:\n{novo_caminho_qr_gerado}")
-            self.display_qr_image(novo_caminho_qr_gerado)
-            self.populate_history()
-            self.clear_input_fields()
+                messagebox.showinfo("Sucesso", f"QR Code atualizado com sucesso e salvo como:\n{novo_caminho_qr_gerado}")
+                self.display_qr_image(novo_caminho_qr_gerado)
+                self.populate_history()
+                self.clear_input_fields()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao atualizar QR Code: {e}")
 
 
     def handle_save_as(self):
-        """Lida com a ação de salvar o QR Code em um local específico escolhido pelo usuário, incluindo logo."""
+        """Lida com a ação de salvar o QR Code em um local específico escolhido pelo usuário."""
         is_valid, texto, nome_arquivo_base = self.validate_inputs()
         if not is_valid:
             return
@@ -437,44 +301,101 @@ class QRGeneratorApp:
         file_path = filedialog.asksaveasfilename(
             defaultextension=".png",
             filetypes=[("PNG files", "*.png"), ("All files", "*.*")],
-            initialfile=nome_arquivo_base
+            initialfile=qr_logic.sanitize_filename(nome_arquivo_base)
         )
 
         if file_path:
-            caminho_qr_gerado = gerar_qr_code_e_salvar(
-                texto,
-                nome_arquivo_base,
-                cor_frente,
-                cor_fundo,
-                nivel_erro_sigla,
-                caminho_personalizado=file_path,
-                caminho_logo=caminho_logo # Passa o caminho do logo para salvar
-            )
-            if caminho_qr_gerado:
-                messagebox.showinfo("Sucesso", f"QR Code salvo com sucesso em:\n{caminho_qr_gerado}")
+            try:
+                caminho_qr_gerado = qr_logic.gerar_qr_code_e_salvar(
+                    texto,
+                    nome_arquivo_base,
+                    cor_frente,
+                    cor_fundo,
+                    nivel_erro_sigla,
+                    caminho_personalizado=file_path,
+                    caminho_logo=caminho_logo
+                )
+                if caminho_qr_gerado:
+                    messagebox.showinfo("Sucesso", f"QR Code salvo com sucesso em:\n{caminho_qr_gerado}")
+                    self.current_displayed_qr_image_path = caminho_qr_gerado
+                    self.copy_to_clipboard_button.config(state=tk.NORMAL)
+            except Exception as e:
+                messagebox.showerror("Erro", f"Erro ao salvar QR Code: {e}")
         else:
             messagebox.showinfo("Informação", "Operação 'Salvar Como' cancelada.")
 
 
+    def copy_qr_to_clipboard(self):
+        """Copia a imagem do QR Code exibida atualmente para a área de transferência."""
+        if not self.current_displayed_qr_image_path:
+            messagebox.showwarning("Atenção", "Nenhum QR Code para copiar. Por favor, gere ou selecione um QR Code primeiro.")
+            return
+
+        try:
+            img_to_copy = Image.open(self.current_displayed_qr_image_path)
+            
+            img_to_copy.thumbnail((500, 500), Image.LANCZOS)
+
+            if win32clipboard:
+                try:
+                    output = io.BytesIO()
+                    img_to_copy.convert("RGB").save(output, "BMP")
+                    data = output.getvalue()[14:] 
+
+                    win32clipboard.OpenClipboard()
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
+                    win32clipboard.CloseClipboard()
+                    messagebox.showinfo("Sucesso", "Imagem copiada para a área de transferência!")
+
+                except Exception as ex:
+                    messagebox.showerror("Erro de Cópia (pywin32)", f"Não foi possível copiar a imagem: {ex}")
+                    self.save_temp_and_notify_clipboard(img_to_copy)
+            else:
+                self.save_temp_and_notify_clipboard(img_to_copy)
+
+        except FileNotFoundError:
+            messagebox.showerror("Erro", "O arquivo da imagem exibida não foi encontrado.")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao acessar a imagem para cópia: {e}")
+
+    def save_temp_and_notify_clipboard(self, img_pil_obj):
+        """Função auxiliar para salvar em um arquivo temporário e notificar o usuário para cópia manual."""
+        # TEMP_CLIPBOARD_DIR já é importado de config.py e garantido que exista
+        temp_file = os.path.join(TEMP_CLIPBOARD_DIR, "temp_qr_clipboard.png")
+        try:
+            img_pil_obj.save(temp_file)
+            messagebox.showinfo("Sucesso (Manual)", f"Imagem salva temporariamente em:\n{temp_file}\n"
+                                                   "Por favor, copie de lá manualmente (Ctrl+C).")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível salvar a imagem temporária: {e}")
+
+
     def display_qr_image(self, image_path):
-        """Exibe a imagem do QR Code na interface."""
+        """Exibe a imagem do QR Code na interface e armazena o caminho para cópia."""
         try:
             img = Image.open(image_path)
             img.thumbnail((300, 300), Image.LANCZOS)
             photo = ImageTk.PhotoImage(img)
             self.qr_label.config(image=photo)
             self.qr_label.image = photo
+            self.current_displayed_qr_image_path = image_path
+            self.copy_to_clipboard_button.config(state=tk.NORMAL)
         except FileNotFoundError:
             self.qr_label.config(image='')
             messagebox.showerror("Erro", f"Arquivo não encontrado: {image_path}")
+            self.current_displayed_qr_image_path = None
+            self.copy_to_clipboard_button.config(state=tk.DISABLED)
         except Exception as e:
             self.qr_label.config(image='')
             messagebox.showerror("Erro", f"Erro ao carregar imagem: {e}")
+            self.current_displayed_qr_image_path = None
+            self.copy_to_clipboard_button.config(state=tk.DISABLED)
 
     def populate_history(self):
         """Preenche a Listbox com os itens do histórico."""
         self.history_listbox.delete(0, tk.END)
-        registros = buscar_historico()
+        registros = db_manager.buscar_historico()
         if not registros:
             self.history_listbox.insert(tk.END, "Nenhum QR Code gerado ainda.")
         else:
@@ -485,7 +406,6 @@ class QRGeneratorApp:
     def display_selected_qr(self, event):
         """
         Exibe o QR Code selecionado na Listbox e preenche os campos de entrada e personalização.
-        Só limpa os campos se realmente não houver seleção (ex: clique fora ou deseleção manual).
         """
         selected_indices = self.history_listbox.curselection()
 
@@ -527,9 +447,7 @@ class QRGeneratorApp:
         }
         self.error_level_var.set(nivel_erro_map_display.get(selected_record[7], "L (Baixo)"))
 
-        # Não preenche o campo de logo automaticamente ao selecionar do histórico
-        # Pois o histórico não armazena o caminho do logo para simplificar.
-        self.logo_path_var.set("") # Limpa o campo do logo para um novo uso
+        self.logo_path_var.set("")
 
         self.update_button.config(state=tk.NORMAL)
 
@@ -553,7 +471,7 @@ class QRGeneratorApp:
 
         if confirm:
             try:
-                deletar_registro_historico(record_id)
+                db_manager.deletar_registro_historico(record_id)
 
                 if os.path.exists(caminho_arquivo):
                     os.remove(caminho_arquivo)
