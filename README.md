@@ -114,10 +114,10 @@ Para executar o aplicativo, certifique-se de que seu ambiente virtual esteja ati
 python -m src.qr_app
 ```
 
-##Contribuição
+## Contribuição
 
 Sinta-se à vontade para contribuir com melhorias, relatar bugs ou sugerir novos recursos.
 
-##Licença
+## Licença
 
 Este projeto está licenciado sob a MIT License.
