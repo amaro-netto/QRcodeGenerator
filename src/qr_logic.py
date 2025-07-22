@@ -5,7 +5,9 @@ import datetime
 import os
 import re
 from PIL import Image, ImageTk
-from src.config import IMAGES_DIR # Importa IMAGES_DIR de config
+
+# Importa o diretório de salvar do config
+from src.config import QR_SAVE_DIR 
 
 def sanitize_filename(filename):
     """Remove caracteres inválidos para nomes de arquivo."""
@@ -54,21 +56,23 @@ def gerar_qr_code_e_salvar(texto, nome_arquivo_base="qr_code", cor_frente="black
                 img_qr.paste(logo, (pos_x, pos_y), logo)
 
             except Exception as e:
-                print(f"Aviso: Não foi possível aplicar o logo. Erro: {e}")
+                print(f"Aviso (qr_logic): Não foi possível aplicar o logo. Erro: {e}")
+                pass
         
         # Salvar a imagem final
         if caminho_personalizado:
             final_path = caminho_personalizado
         else:
-            # Usa o diretório de imagens de config.py
+            # Garante que o diretório de QR codes exista antes de salvar
+            # (já garantido por config.py e qr_app.py, mas seguro aqui)
+            if not os.path.exists(QR_SAVE_DIR):
+                os.makedirs(QR_SAVE_DIR)
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             nome_arquivo_completo = f"{sanitize_filename(nome_arquivo_base)}_{timestamp}.png"
-            final_path = os.path.join(IMAGES_DIR, nome_arquivo_completo)
+            final_path = os.path.join(QR_SAVE_DIR, nome_arquivo_completo)
 
         img_qr.save(final_path)
         return final_path
     except Exception as e:
         print(f"Erro ao gerar QR Code: {e}")
         return None
-
-# A função get_qr_image_for_display não é mais necessária aqui, pois a lógica de exibição está em qr_app.py
