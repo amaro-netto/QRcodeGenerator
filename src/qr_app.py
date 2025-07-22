@@ -3,34 +3,57 @@
 import tkinter as tk
 from tkinter import messagebox, filedialog, colorchooser, ttk
 from PIL import Image, ImageTk 
-import os
-import re
-import io
+import os 
+import io 
 
-# Tenta importar win32clipboard, mas o fallback ainda está dentro de copy_qr_to_clipboard
+# Importações dos módulos refatorados
+from src import db_manager
+from src import qr_logic
+# Importa todos os diretórios e caminhos de config
+from src.config import QR_SAVE_DIR, TEMP_CLIPBOARD_DIR, DB_NAME, ICONS_DIR, ICON_PATH 
+
+# Importação condicional para win32clipboard (apenas para Windows)
 try:
     import win32clipboard
 except ImportError:
     win32clipboard = None
 
-# Importações corrigidas para o novo layout de pacote e config
-from src import db_manager
-from src import qr_logic
-from src.config import DB_NAME, IMAGES_DIR, TEMP_CLIPBOARD_DIR # Importa diretórios de config
 
 class QRGeneratorApp:
     def __init__(self, master):
         self.master = master
         master.title("Gerador de QR Code")
-        master.geometry("800x750")
+        master.geometry("800x600") # Altura inicial reduzida, pois o histórico estará oculto
+        master.resizable(True, True) # Permite redimensionar, mas o conteúdo será mais estável
 
-        # Garante que os diretórios necessários existam (já feito em config.py, mas pode repetir para segurança)
-        os.makedirs(IMAGES_DIR, exist_ok=True)
+        # --- Configurar o ícone da janela ---
+        print(f"DEBUG: Tentando carregar ícone de: {ICON_PATH}") # DEBUG
+        if os.path.exists(ICON_PATH):
+            print(f"DEBUG: Arquivo de ícone encontrado: {ICON_PATH}") # DEBUG
+            try:
+                icon_image = Image.open(ICON_PATH)
+                icon_image.thumbnail((64, 64), Image.LANCZOS) 
+                self.tk_icon = ImageTk.PhotoImage(icon_image)
+                master.iconphoto(False, self.tk_icon) # False significa que sub-janelas não herdarão automaticamente
+                print("DEBUG: Ícone carregado e aplicado com sucesso.") # DEBUG
+            except Exception as e:
+                print(f"ERRO: Não foi possível carregar ou aplicar o ícone da janela: {e}") # DEBUG
+                messagebox.showwarning("Aviso", f"Não foi possível carregar o ícone da janela: {e}\nVerifique se 'logo.png' está em '{ICON_PATH}'.")
+        else:
+            print(f"AVISO: Ícone da janela não encontrado em {ICON_PATH}. Usando ícone padrão.") # DEBUG
+            messagebox.showwarning("Aviso", f"Ícone da janela não encontrado em '{ICON_PATH}'. Usando ícone padrão.")
+
+
+        # Garante que os diretórios necessários existam (config.py já tenta criar)
+        os.makedirs(QR_SAVE_DIR, exist_ok=True)
         os.makedirs(TEMP_CLIPBOARD_DIR, exist_ok=True)
-        
-        # Inicializa o banco de dados
+        os.makedirs(ICONS_DIR, exist_ok=True) # Garante pasta de ícones, embora config.py já faça
+
+
+        # Inicializa o banco de dados (chamadas de criação e migração de tabela)
         db_manager.criar_tabela()
         db_manager.migrar_tabela()
+
 
         self.front_color_hex = tk.StringVar(value="black")
         self.back_color_hex = tk.StringVar(value="white")
@@ -42,14 +65,17 @@ class QRGeneratorApp:
         self.current_selected_qr_old_path = None
         self.current_displayed_qr_image_path = None
 
+        self.history_visible = False # Estado inicial: histórico oculto
+
 
         self.main_frame = tk.Frame(master, padx=10, pady=10)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- Seção de Geração de QR Code ---
+        # --- Seção de Geração/Edição de QR Code ---
         self.generation_frame = tk.LabelFrame(self.main_frame, text="Gerar/Editar QR Code", padx=10, pady=10)
         self.generation_frame.pack(pady=10, fill=tk.BOTH, expand=True)
 
+        # Frame para inputs e opções (lado esquerdo)
         self.input_options_frame = tk.Frame(self.generation_frame, padx=5, pady=5)
         self.input_options_frame.grid(row=0, column=0, sticky="nsew")
 
@@ -110,17 +136,22 @@ class QRGeneratorApp:
         self.copy_to_clipboard_button = tk.Button(self.action_buttons_frame, text="Copiar Imagem", command=self.copy_qr_to_clipboard, state=tk.DISABLED)
         self.copy_to_clipboard_button.pack(side=tk.LEFT, padx=5)
 
-        # Área para exibir o QR Code (Coluna Direita)
-        self.qr_label = tk.Label(self.generation_frame)
-        self.qr_label.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+        # --- Área para exibir o QR Code (lado direito) - FIXO ---
+        self.qr_display_frame = tk.Frame(self.generation_frame, width=300, height=300, bd=2, relief="groove")
+        self.qr_display_frame.grid(row=0, column=1, padx=10, pady=10, sticky="nsew")
+        self.qr_display_frame.grid_propagate(False)
+
+        self.qr_label = tk.Label(self.qr_display_frame)
+        self.qr_label.pack(expand=True, fill=tk.BOTH)
 
         self.generation_frame.grid_columnconfigure(0, weight=1)
-        self.generation_frame.grid_columnconfigure(1, weight=1)
-        self.generation_frame.grid_rowconfigure(0, weight=1)
+        self.generation_frame.grid_columnconfigure(1, weight=0, minsize=320)
 
-        # --- Seção de Histórico ---
+        # --- Seção de Histórico (Inicialmente Oculta) ---
+        self.toggle_history_button = tk.Button(self.main_frame, text="Mostrar Histórico", command=self.toggle_history_visibility)
+        self.toggle_history_button.pack(pady=5)
+
         self.history_frame = tk.LabelFrame(self.main_frame, text="Histórico de QR Codes", padx=10, pady=10)
-        self.history_frame.pack(pady=10, fill=tk.BOTH, expand=True)
 
         self.history_listbox = tk.Listbox(self.history_frame, height=10)
         self.history_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -143,6 +174,17 @@ class QRGeneratorApp:
         self.clear_fields_button.pack(side=tk.LEFT, padx=5)
 
         self.populate_history()
+
+    def toggle_history_visibility(self):
+        if self.history_visible:
+            self.history_frame.pack_forget()
+            self.toggle_history_button.config(text="Mostrar Histórico")
+            self.history_visible = False
+        else:
+            self.history_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+            self.toggle_history_button.config(text="Esconder Histórico")
+            self.history_visible = True
+
 
     def choose_front_color(self):
         color_code = colorchooser.askcolor(title="Escolha a Cor do QR Code", initialcolor=self.front_color_hex.get())
@@ -361,7 +403,6 @@ class QRGeneratorApp:
 
     def save_temp_and_notify_clipboard(self, img_pil_obj):
         """Função auxiliar para salvar em um arquivo temporário e notificar o usuário para cópia manual."""
-        # TEMP_CLIPBOARD_DIR já é importado de config.py e garantido que exista
         temp_file = os.path.join(TEMP_CLIPBOARD_DIR, "temp_qr_clipboard.png")
         try:
             img_pil_obj.save(temp_file)
@@ -401,6 +442,7 @@ class QRGeneratorApp:
         else:
             self.history_data = registros
             for registro in registros:
+                # CORRIGIDO: Agora usa registro[2] (nome_arquivo) para exibir na lista
                 self.history_listbox.insert(tk.END, f"ID: {registro[0]} | Nome: {registro[2]} | Criado em: {registro[4]} | Cores: {registro[5]}/{registro[6]} | Nível: {registro[7]}")
 
     def display_selected_qr(self, event):

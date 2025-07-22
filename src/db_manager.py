@@ -2,8 +2,8 @@
 
 import sqlite3
 import datetime
-import os
-from src.config import DB_NAME, IMAGES_DIR # Importa DB_NAME e IMAGES_DIR de config
+import os # Importar os para path.exists/makedirs nas chamadas de criar/migrar
+from src.config import DB_NAME # Importa DB_NAME do config
 
 def criar_tabela():
     """Cria a tabela de historico_qr_codes se ela não existir."""
@@ -84,7 +84,3 @@ def deletar_registro_historico(registro_id):
     cursor.execute("DELETE FROM historico_qr_codes WHERE id = ?", (registro_id,))
     conn.commit()
     conn.close()
-
-# As chamadas de criação e migração de tabela serão feitas pela aplicação principal ou ao importar
-# criar_tabela()
-# migrar_tabela()
