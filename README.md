@@ -71,7 +71,7 @@ Siga estes passos para configurar e instalar o projeto:
 
 1.  **Clone o Repositório** (ou baixe os arquivos):
     ```bash
-    git clone <URL_DO_SEU_REPOSITORIO>
+    git clone https://github.com/amaro-netto/QRcodeGenerator
     cd QRcodeGenerator
     ```
 
